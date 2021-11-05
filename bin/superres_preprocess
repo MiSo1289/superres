@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+
+from sys import argv
+
+import superres.main
+
+if __name__ == '__main__':
+    superres.main.preprocess(argv[1], argv[2])

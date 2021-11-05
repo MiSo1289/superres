@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+
+from scipy import misc
+import scipy.ndimage as scndi
+
+import matplotlib.pyplot as plt
+
+if __name__ == '__main__':
+    fig = plt.figure()
+    plt.gray()  # show the filtered result in grayscale
+    ax1 = fig.add_subplot(121)  # left side
+    ax2 = fig.add_subplot(122)  # right side
+    ascent = misc.ascent()
+    result = scndi.gaussian_filter1d(ascent, sigma=10, axis=1)
+    ax1.imshow(ascent)
+    ax2.imshow(result)
+    plt.show()
