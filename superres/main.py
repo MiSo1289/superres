@@ -1,9 +1,10 @@
 import os
 
+from torch. import
 from napari import view_image
 
-from superres.dataset.ics import IcsDataset, save_dataset_as_ics
-from superres.dataset.preprocessing import BspInterpolate
+from superres.data.ics import IcsDataset, save_dataset_as_ics
+from superres.data.preprocessing import DownSample
 
 
 def view_ics(in_file: str) -> None:
@@ -21,7 +22,7 @@ def preprocess(in_file: str, out_folder: str) -> None:
 
     ds = IcsDataset(
         [in_file],
-        transform=BspInterpolate(dim=0, num_samples=256),
+        transform=DownSample(dim=0, factor=2),
     )
 
     save_dataset_as_ics(ds, out_folder)
