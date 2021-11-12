@@ -1,0 +1,7 @@
+numpy
+scipy
+cupy
+torch
+torchvision
+napari
+matplotlib
