@@ -13,9 +13,10 @@ from torch.utils.data import ChainDataset, IterableDataset
 from torchvision.transforms import Compose
 
 import superres.operators.ops as ops
+from superres.data.cache import CacheDataset
 from superres.data.ics import IcsDataset, LoadIcsImagesFromDir
 from superres.data.view import view_dataset
-from superres.nn.serve import infer, load_edsr
+from superres.nn.infer import infer, load_edsr
 from superres.nn.train import train_edsr
 
 NamedImage = tuple[np.ndarray, str]
@@ -143,32 +144,53 @@ def view_command(images: list[str], **kwargs: object) -> None:
 
 def train_command(images: list[str], target_folder: str, out_model: str,
                   scale: int, infer_axis: int, rgb_range: int,
+                  in_memory: bool, device: str, epochs: int, batch_size: int,
+                  patch_size: int, learning_rate: float,
                   **kwargs: object) -> None:
+    if len(images) == 1:
+        # Avoid needlessly re-reading the image from disk
+        in_memory = True
+
+    train_dataset: IterableDataset[tuple[np.ndarray, np.ndarray]] = IcsDataset(
+        images,
+        target_transform=LoadIcsImagesFromDir(target_folder),
+    )
+
+    if in_memory:
+        print("Keeping all training images in memory when training")
+        train_dataset = CacheDataset(train_dataset)
+
     model = train_edsr(
-        IcsDataset(
-            images,
-            target_transform=LoadIcsImagesFromDir(target_folder),
-        ),
+        train_dataset,
         scale=scale,
         infer_axis=infer_axis,
         rgb_range=rgb_range,
+        device=device,
+        epochs=epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        patch_size=patch_size,
     )
+
+    os.makedirs(os.path.dirname(out_model), exist_ok=True)
     torch.save(model.state_dict(), out_model)
 
 
-def inferred_dataset(model: str, images: list[str],
-                     scale: int, rgb_range: int, train_axis: int,
+def inferred_dataset(model: str, images: list[str], scale: int, rgb_range: int,
+                     infer_axis: int, train_axis: int, device: str,
                      **kwargs: object) -> NamedImageDataset:
     model = load_edsr(
         model_path=model,
         scale=scale,
         rgb_range=rgb_range,
+        device=device,
     )
 
     return IcsDataset(
         images,
         transform=lambda image: infer(
-            model=model, image=image, scale=scale, train_axis=train_axis),
+            model=model, image=image, scale=scale, infer_axis=infer_axis,
+            train_axis=train_axis, device=device),
     )
 
 
@@ -357,6 +379,41 @@ def main() -> None:
         default=255,
         help="Max color value",
     )
+    train_parser.add_argument(
+        "--in-memory",
+        action="store_true",
+        help="Keep all images in memory while training",
+    )
+    train_parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda:0",
+        help="Device to train on",
+    )
+    train_parser.add_argument(
+        "--epochs",
+        type=int,
+        default=5,
+        help="Number of passes over the whole dataset",
+    )
+    train_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Size of mini-batch",
+    )
+    train_parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=1e-6,
+        help="Learning rate",
+    )
+    train_parser.add_argument(
+        "--patch-size",
+        type=int,
+        default=32,
+        help="Size of cropped regions to train on",
+    )
 
     infer_parser = create_dataset_command_parser(
         subparsers.add_parser(
@@ -383,10 +440,22 @@ def main() -> None:
         help="Train axis",
     )
     infer_parser.add_argument(
+        "--infer-axis",
+        type=int,
+        default=0,
+        help="Inference axis",
+    )
+    infer_parser.add_argument(
         "--rgb-range",
         type=int,
         default=255,
         help="Max color value",
+    )
+    infer_parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda:0",
+        help="Device to run inference on",
     )
 
     view_parser = subparsers.add_parser(

@@ -76,6 +76,7 @@ class Rotate:
             axes=self.axes,
             angle=degrees(self.theta),
             mode="reflect",
+            reshape=False,
         )
 
     def partition_axis(self, shape: tuple[int, ...]) -> int | None:

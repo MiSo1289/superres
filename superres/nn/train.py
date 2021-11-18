@@ -17,10 +17,14 @@ T = TypeVar("T", bound=np.generic)
 
 def train_edsr(images: IterableDataset[tuple[npt.NDArray[T], npt.NDArray[T]]],
                scale: int = 2,
-               patch_size: int = 32, train_axis: int = 2,
+               patch_size: int = 32,
                infer_axis: int = 0,
-               rgb_range: int = 255) -> nn.Module:
-    first_image = images[0][0]
+               rgb_range: int = 255,
+               device: str = "cuda:0",
+               epochs: int = 5,
+               batch_size: int = 32,
+               learning_rate: float = 1e-6) -> nn.Module:
+    # first_image = images[0][0]
     # zero_level = np.min(first_image)
     # std = np.std(first_image)
     # max_val = np.max(first_image)
@@ -31,7 +35,6 @@ def train_edsr(images: IterableDataset[tuple[npt.NDArray[T], npt.NDArray[T]]],
         transform=Compose([
             lambda im: np.stack(3 * [im.astype(np.float32)], axis=-1),
             ToTensor(),
-            #Normalize(mean=zero_level, std=std),
             RandomCrop(size=patch_size),
             RandomHorizontalFlip(),
             RandomVerticalFlip(),
@@ -40,7 +43,6 @@ def train_edsr(images: IterableDataset[tuple[npt.NDArray[T], npt.NDArray[T]]],
         target_transform=Compose([
             lambda im: np.stack(3 * [im.astype(np.float32)], axis=-1),
             ToTensor(),
-            #Normalize(mean=zero_level, std=std),
             RandomCrop(size=(patch_size, patch_size)),
             RandomHorizontalFlip(),
             RandomVerticalFlip(),
@@ -52,27 +54,55 @@ def train_edsr(images: IterableDataset[tuple[npt.NDArray[T], npt.NDArray[T]]],
         n_colors=3,
         scale=(scale, scale),
         rgb_range=rgb_range,
-    )).to("cuda")
-
-    learning_rate = 1e-6
-    batch_size = 32
-    epochs = 1
+    )).to(device=device)
 
     loss_fn = nn.MSELoss()
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=learning_rate,
+        betas=(0.9, 0.999),
+        eps=1e-08,
+        weight_decay=4e-3,
+        # weight_decay=0.0,
+        amsgrad=False,
+    )
 
     dataloader = DataLoader(train_data, batch_size=batch_size)
+
+    epoch_avg_losses: list[float] = []
+
+    print(f"epochs={epochs} batch_size={batch_size}")
+    print(f"learning_rate={learning_rate}")
+
     for epoch in range(epochs):
-        for batch, (x, y) in enumerate(dataloader):
+        epoch_sum_loss = 0.0
+        num_batches = 0
+
+        for batch, (image, target) in enumerate(dataloader):
             # Compute prediction and loss
-            pred = model(x.to("cuda"))
-            loss = loss_fn(pred, y.to("cuda"))
+            pred = model(image.to(device=device))
+            loss = loss_fn(pred, target.to(device=device))
 
             # Backpropagation
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            print(f"epoch: {epoch} batch: {batch} loss: {loss}")
+            print(f"epoch={epoch} batch={batch} loss={loss}")
+
+            epoch_sum_loss += loss.item()
+            num_batches += 1
+
+        epoch_avg_loss = epoch_sum_loss / num_batches
+        print(f"epoch_avg_loss={epoch_avg_loss}")
+
+        epoch_avg_losses.append(epoch_avg_loss)
+
+        if len(epoch_avg_losses) >= 2:
+            epoch_loss_delta = epoch_avg_losses[-1] - epoch_avg_losses[-2]
+            print(f"epoch_loss_delta={epoch_loss_delta}")
+
+    print("Finished training")
+    print(f"epoch_avg_losses={epoch_avg_losses}")
 
     return model

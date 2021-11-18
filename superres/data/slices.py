@@ -21,13 +21,8 @@ class SlicesDataset(IterableDataset[tuple[np.ndarray, np.ndarray]]):
             assert image.shape[self.sliced_axis] \
                    == target.shape[self.sliced_axis]
 
-            for i in range(image.shape[self.sliced_axis]):
-                indices: list[int | slice] = len(image.shape) * \
-                                             [slice(None, None, None)]
-                indices[self.sliced_axis] = i
-                index_tuple = tuple(indices)
-
-                yield image[index_tuple], target[index_tuple]
+            yield from zip(slices(image, self.sliced_axis),
+                           slices(target, self.sliced_axis))
 
 
 def slices(image: np.ndarray, axis: int) -> Iterator[np.ndarray]:

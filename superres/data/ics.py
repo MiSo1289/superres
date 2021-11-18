@@ -14,6 +14,8 @@ U = TypeVar("U")
 
 
 def read_ics_or_fail_descriptively(image_path: Path) -> np.ndimage:
+    print(f"Reading image {image_path}")
+
     read_error: Exception | None = None
     image: np.ndarray | None = None
 

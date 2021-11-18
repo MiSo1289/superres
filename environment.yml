@@ -1,0 +1,16 @@
+name: superres
+channels:
+  - defaults
+  - conda-forge
+  - nvidia
+  - pytorch
+dependencies:
+  - cupy=9.6.*
+  - matplotlib=3.4.*
+  - numpy=1.21.*
+  - python>=3.9.7
+  - scipy=1.7.*
+  - conda-forge::napari=0.4.*
+  - nvidia::cudatoolkit=11.3
+  - pytorch::pytorch=1.10.*
+  - pytorch::torchvision=0.11.*

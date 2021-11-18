@@ -6,16 +6,22 @@ SRC_DIR="${BIN_DIR}/.."
 export PATH="${PATH}:${BIN_DIR}"
 export PYTHONPATH="${PYTHONPATH}:${SRC_DIR}"
 
-DATA_ROOT="/data/miso/PV162"
-OUT_ROOT="${DATA_ROOT}/out"
-IMG_NAME="image-final_0000.ics"
+# Axis indexing: z=0, y=1, x=2
 INFERENCE_AXIS=0
-TRAIN_AXIS=2
-AUX_AXIS=1
+TRAIN_AXIS_1=2
+TRAIN_AXIS_2=1
 SLICE_SEPARATION=4
 NUM_ROTATIONS=8
-NUM_PARTITIONS=2
+NUM_PARTITIONS=1
 RGB_RANGE=600
+TRAIN_EPOCHS=8
+TRAIN_BATCH_SIZE=64
+TRAIN_LEARNING_RATE="1e-3"
+TRAIN_PATCH_SIZE=128
+
+DATA_ROOT="/home/miso/Projects/Courses/PV162/data"
+OUT_ROOT="${DATA_ROOT}/out-${SLICE_SEPARATION}x"
+IMG_NAME="image-final_0000.ics"
 
 echo "Step 0: construct synthetic anisotropic data"
 # Downsample original isotropic data to create fake anisotropic data
@@ -31,24 +37,44 @@ superres bsp-interpolate -a "${INFERENCE_AXIS}" -x "${SLICE_SEPARATION}" \
 
 echo "Step 2: construct training data"
 # Generate rotations around the inference axis
-superres rotate --axis-1 "${TRAIN_AXIS}" --axis-2 "${AUX_AXIS}" \
+superres rotate --axis-1 "${TRAIN_AXIS_1}" --axis-2 "${TRAIN_AXIS_2}" \
   -p "${NUM_PARTITIONS}" -n "${NUM_ROTATIONS}" -o "${OUT_ROOT}/train/rotated" \
   "${OUT_ROOT}/interpolated/"*
 # Blur on the training axis
-superres gaussian-blur -a "${TRAIN_AXIS}" --fwhm "${SLICE_SEPARATION}" \
+superres gaussian-blur -a "${TRAIN_AXIS_1}" --fwhm "${SLICE_SEPARATION}" \
   -p "${NUM_PARTITIONS}" -o "${OUT_ROOT}/train/blurred" \
   "${OUT_ROOT}/train/rotated/"*
 # Introduce aliasing on the training axis
-superres create-aliasing -a "${TRAIN_AXIS}" -x "${SLICE_SEPARATION}" \
+superres create-aliasing -a "${TRAIN_AXIS_1}" -x "${SLICE_SEPARATION}" \
   -p "${NUM_PARTITIONS}" -o "${OUT_ROOT}/train/aliased" \
   "${OUT_ROOT}/train/blurred/"*
 
-echo "Step 3: train a SSR network"
-superres train --infer-axis "${INFERENCE_AXIS}" -s "${SLICE_SEPARATION}" \
-  -o "${OUT_ROOT}/model/ssr-cuda" -t "${OUT_ROOT}/train/rotated" \
-  --rgb-range "${RGB_RANGE}" "${OUT_ROOT}/train/aliased/"*
+echo "Step 3: train a SSA network"
+superres train --in-memory --infer-axis "${INFERENCE_AXIS}" -s "${SLICE_SEPARATION}" \
+  --patch-size "${TRAIN_PATCH_SIZE}" -o "${OUT_ROOT}/model/ssa.pt" -t "${OUT_ROOT}/train/blurred" \
+  --rgb-range "${RGB_RANGE}" --epochs "${TRAIN_EPOCHS}" --batch-size "${TRAIN_BATCH_SIZE}" \
+  --learning-rate "${TRAIN_LEARNING_RATE}" "${OUT_ROOT}/train/aliased/"*
 
-echo "Step 4: run inference"
-superres infer --train-axis "${TRAIN_AXIS}" -s "${SLICE_SEPARATION}" \
-  -m "${OUT_ROOT}/model/ssr-cuda" -o "${OUT_ROOT}/inferrence/ssr" \
-  --rgb-range "${RGB_RANGE}" "${OUT_ROOT}/anisotropic/"*
+echo "Step 4: train a SSR network"
+superres train --in-memory --infer-axis "${INFERENCE_AXIS}" -s "${SLICE_SEPARATION}" \
+  --patch-size "${TRAIN_PATCH_SIZE}" -o "${OUT_ROOT}/model/ssr.pt" -t "${OUT_ROOT}/train/rotated" \
+  --rgb-range "${RGB_RANGE}" --epochs "${TRAIN_EPOCHS}" --batch-size "${TRAIN_BATCH_SIZE}" \
+  --learning-rate "${TRAIN_LEARNING_RATE}" "${OUT_ROOT}/train/aliased/"*
+
+#echo "Step 5: run SSA inference"
+#superres infer --train-axis "${TRAIN_AXIS_2}" --infer-axis "${INFERENCE_AXIS}" \
+#  -s "${SLICE_SEPARATION}" \
+#  -m "${OUT_ROOT}/model/ssa.pt" -o "${OUT_ROOT}/inference/ssa" \
+#  --rgb-range "${RGB_RANGE}" "${OUT_ROOT}/interpolated/"*
+
+#echo "Step 6: run SSR inference"
+#superres infer --train-axis "${TRAIN_AXIS_1}" --infer-axis "${INFERENCE_AXIS}" \
+#  -s "${SLICE_SEPARATION}" \
+#  -m "${OUT_ROOT}/model/ssr.pt" -o "${OUT_ROOT}/inference/ssr" -d \
+#  --rgb-range "${RGB_RANGE}" "${OUT_ROOT}/inference/ssa/"*
+
+echo "Step 6.b: run SSR inference without SSA"
+superres infer --train-axis "${TRAIN_AXIS_1}" --infer-axis "${INFERENCE_AXIS}" \
+  -s "${SLICE_SEPARATION}" \
+  -m "${OUT_ROOT}/model/ssr.pt" -o "${OUT_ROOT}/inference/ssr-only" -d \
+  --rgb-range "${RGB_RANGE}" "${OUT_ROOT}/interpolated/"*

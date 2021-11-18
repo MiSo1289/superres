@@ -1,7 +1,7 @@
-numpy
-scipy
-cupy
-torch
-torchvision
-napari
-matplotlib
+cupy==9.6.*
+matplotlib=3.4.*
+napari==0.4.*
+numpy==1.21.*
+scipy==1.7.*
+torch==1.10.*
+torchvision==0.11.*
