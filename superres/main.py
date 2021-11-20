@@ -8,17 +8,20 @@ from typing import Callable, Iterator
 import numpy as np
 import torch
 from napari import view_image
-from pyics import write_ics
 from torch.utils.data import ChainDataset, IterableDataset
 from torchvision.transforms import Compose
 
 import superres.operators.ops as ops
 from superres.data.cache import CacheDataset
-from superres.data.ics import IcsDataset, LoadIcsImagesFromDir
+from superres.data.ics import IcsDataset, LoadIcsImagesFromDir, \
+    verbose_read_ics, verbose_write_ics
 from superres.data.view import view_dataset
+from superres.evaluation.error import named_error_function
 from superres.nn.infer import infer, load_edsr
 from superres.nn.train import train_edsr
 
+ImagePair = tuple[np.ndarray, np.ndarray]
+ImagePairDataset = IterableDataset[ImagePair]
 NamedImage = tuple[np.ndarray, str]
 NamedImageDataset = IterableDataset[NamedImage]
 NamedImageDatasetFactory = Callable[[...], NamedImageDataset]
@@ -110,8 +113,7 @@ def create_dataset_command_parser(
             if output_folder:
                 os.makedirs(output_folder, exist_ok=True)
                 out_path = os.path.join(output_folder, f"{label}.ics")
-                print(f"Saving image {out_path}")
-                write_ics(out_path, image)
+                verbose_write_ics(out_path, image)
             if display or not output_folder:
                 viewer = view_image(image, title=label)
                 viewer.show(block=True)
@@ -151,7 +153,7 @@ def train_command(images: list[str], target_folder: str, out_model: str,
         # Avoid needlessly re-reading the image from disk
         in_memory = True
 
-    train_dataset: IterableDataset[tuple[np.ndarray, np.ndarray]] = IcsDataset(
+    train_dataset: ImagePairDataset = IcsDataset(
         images,
         target_transform=LoadIcsImagesFromDir(target_folder),
     )
@@ -172,19 +174,23 @@ def train_command(images: list[str], target_folder: str, out_model: str,
         patch_size=patch_size,
     )
 
+    print(f"Saving model '{out_model}'...", end=" ", flush=True)
     os.makedirs(os.path.dirname(out_model), exist_ok=True)
     torch.save(model.state_dict(), out_model)
+    print("DONE")
 
 
 def inferred_dataset(model: str, images: list[str], scale: int, rgb_range: int,
                      infer_axis: int, train_axis: int, device: str,
                      **kwargs: object) -> NamedImageDataset:
+    print(f"Saving model '{model}'...", end=" ", flush=True)
     model = load_edsr(
         model_path=model,
         scale=scale,
         rgb_range=rgb_range,
         device=device,
     )
+    print("DONE")
 
     return IcsDataset(
         images,
@@ -192,6 +198,21 @@ def inferred_dataset(model: str, images: list[str], scale: int, rgb_range: int,
             model=model, image=image, scale=scale, infer_axis=infer_axis,
             train_axis=train_axis, device=device),
     )
+
+
+def compare_command(reference: str, images: list[str], metric: str,
+                    **kwargs: object) -> None:
+    error_function = named_error_function(metric)
+    reference_image = verbose_read_ics(reference)
+    compared_set = IcsDataset(images)
+
+    results = {
+        name: error_function(reference_image, image)
+        for (image, _), name in zip(compared_set, images)
+    }
+
+    for name, error in results.items():
+        print(f"{name} {metric}={error}")
 
 
 def main() -> None:
@@ -456,6 +477,30 @@ def main() -> None:
         type=str,
         default="cuda:0",
         help="Device to run inference on",
+    )
+
+    compare_parser = subparsers.add_parser(
+        "compare",
+        help="Compare ICS images",
+    )
+    compare_parser.set_defaults(command=compare_command)
+    compare_parser.add_argument(
+        "images",
+        type=str,
+        nargs='+',
+        help="Images to be compared to reference",
+    )
+    compare_parser.add_argument(
+        "-r", "--reference",
+        type=str,
+        required=True,
+        help="Reference image to compare to",
+    )
+    compare_parser.add_argument(
+        "-m", "--metric",
+        type=str,
+        default="mse",
+        help="Metric to use for comparison",
     )
 
     view_parser = subparsers.add_parser(

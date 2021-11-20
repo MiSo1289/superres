@@ -14,10 +14,11 @@ SLICE_SEPARATION=4
 NUM_ROTATIONS=8
 NUM_PARTITIONS=1
 RGB_RANGE=600
-TRAIN_EPOCHS=8
+TRAIN_EPOCHS=16
 TRAIN_BATCH_SIZE=64
 TRAIN_LEARNING_RATE="1e-3"
 TRAIN_PATCH_SIZE=128
+COMPARE_METRIC="mse"
 
 DATA_ROOT="/home/miso/Projects/Courses/PV162/data"
 OUT_ROOT="${DATA_ROOT}/out-${SLICE_SEPARATION}x"
@@ -61,20 +62,27 @@ superres train --in-memory --infer-axis "${INFERENCE_AXIS}" -s "${SLICE_SEPARATI
   --rgb-range "${RGB_RANGE}" --epochs "${TRAIN_EPOCHS}" --batch-size "${TRAIN_BATCH_SIZE}" \
   --learning-rate "${TRAIN_LEARNING_RATE}" "${OUT_ROOT}/train/aliased/"*
 
-#echo "Step 5: run SSA inference"
-#superres infer --train-axis "${TRAIN_AXIS_2}" --infer-axis "${INFERENCE_AXIS}" \
-#  -s "${SLICE_SEPARATION}" \
-#  -m "${OUT_ROOT}/model/ssa.pt" -o "${OUT_ROOT}/inference/ssa" \
-#  --rgb-range "${RGB_RANGE}" "${OUT_ROOT}/interpolated/"*
+echo "Step 5: run SSA inference"
+superres infer --train-axis "${TRAIN_AXIS_2}" --infer-axis "${INFERENCE_AXIS}" \
+  -s "${SLICE_SEPARATION}" \
+  -m "${OUT_ROOT}/model/ssa.pt" -o "${OUT_ROOT}/inference/ssa" \
+  --rgb-range "${RGB_RANGE}" "${OUT_ROOT}/interpolated/"*
 
-#echo "Step 6: run SSR inference"
-#superres infer --train-axis "${TRAIN_AXIS_1}" --infer-axis "${INFERENCE_AXIS}" \
-#  -s "${SLICE_SEPARATION}" \
-#  -m "${OUT_ROOT}/model/ssr.pt" -o "${OUT_ROOT}/inference/ssr" -d \
-#  --rgb-range "${RGB_RANGE}" "${OUT_ROOT}/inference/ssa/"*
+echo "Step 6: run SSR inference"
+superres infer --train-axis "${TRAIN_AXIS_1}" --infer-axis "${INFERENCE_AXIS}" \
+  -s "${SLICE_SEPARATION}" \
+  -m "${OUT_ROOT}/model/ssr.pt" -o "${OUT_ROOT}/inference/ssr" -d \
+  --rgb-range "${RGB_RANGE}" "${OUT_ROOT}/inference/ssa/"*
 
 echo "Step 6.b: run SSR inference without SSA"
 superres infer --train-axis "${TRAIN_AXIS_1}" --infer-axis "${INFERENCE_AXIS}" \
   -s "${SLICE_SEPARATION}" \
   -m "${OUT_ROOT}/model/ssr.pt" -o "${OUT_ROOT}/inference/ssr-only" -d \
   --rgb-range "${RGB_RANGE}" "${OUT_ROOT}/interpolated/"*
+
+echo "Step 7: compare the results to ground truth"
+superres compare -m "${COMPARE_METRIC}" -r "${DATA_ROOT}/orig/${IMG_NAME}" \
+  "${OUT_ROOT}/interpolated"/* \
+  "${OUT_ROOT}/inference/ssa"/* \
+  "${OUT_ROOT}/inference/ssr"/* \
+  "${OUT_ROOT}/inference/ssr-only"/*

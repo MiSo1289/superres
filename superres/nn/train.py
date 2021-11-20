@@ -29,7 +29,6 @@ def train_edsr(images: IterableDataset[tuple[npt.NDArray[T], npt.NDArray[T]]],
     # std = np.std(first_image)
     # max_val = np.max(first_image)
 
-
     train_data = TransformedDataset(
         SlicesDataset(images, sliced_axis=infer_axis),
         transform=Compose([
@@ -63,7 +62,6 @@ def train_edsr(images: IterableDataset[tuple[npt.NDArray[T], npt.NDArray[T]]],
         betas=(0.9, 0.999),
         eps=1e-08,
         weight_decay=4e-3,
-        # weight_decay=0.0,
         amsgrad=False,
     )
 
