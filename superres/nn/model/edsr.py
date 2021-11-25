@@ -25,10 +25,8 @@ class Args(NamedTuple):
     n_resblocks: int = 16
     # Number of feature maps
     n_feats: int = 64
-    # Max RGB value
-    rgb_range: int = 255
-    # Super-resolution scale
-    scale: tuple[int, ...] = 4
+    # Max value of color channels
+    max_color_level: int = 255
     # Number of color channels
     n_colors: int = 3
     # Residual scaling
@@ -42,15 +40,17 @@ class EDSR(nn.Module):
         n_resblocks = args.n_resblocks
         n_feats = args.n_feats
         kernel_size = 3
-        scale = args.scale[0]
         act = nn.ReLU(True)
-        url_name = 'r{}f{}x{}'.format(n_resblocks, n_feats, scale)
-        if url_name in url:
-            self.url = url[url_name]
+
+        if args.n_colors == 3:
+            self.sub_mean = common.MeanShiftRgb(args.max_color_level)
+            self.add_mean = common.MeanShiftRgb(args.max_color_level, sign=1)
+        elif args.n_colors == 1:
+            self.sub_mean = common.MeanShiftGrayscale(args.max_color_level)
+            self.add_mean = common.MeanShiftGrayscale(args.max_color_level,
+                                                      sign=1)
         else:
-            self.url = None
-        self.sub_mean = common.MeanShift(args.rgb_range)
-        self.add_mean = common.MeanShift(args.rgb_range, sign=1)
+            raise RuntimeError("Only grayscale and RGB is supported")
 
         # define head module
         m_head = [conv(args.n_colors, n_feats, kernel_size)]
@@ -65,7 +65,6 @@ class EDSR(nn.Module):
 
         # define tail module
         m_tail = [
-            common.Upsampler(conv, scale, n_feats, act=False),
             conv(n_feats, args.n_colors, kernel_size)
         ]
 

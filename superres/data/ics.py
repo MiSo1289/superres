@@ -7,6 +7,8 @@ import numpy as np
 from pyics import read_ics, write_ics
 from torch.utils.data import IterableDataset
 
+from superres.utils.op_indicator import op_indicator
+
 Path = Union[str, bytes, os.PathLike[str], os.PathLike[bytes]]
 
 T = TypeVar("T")
@@ -14,17 +16,13 @@ U = TypeVar("U")
 
 
 def verbose_read_ics(image_path: Path) -> np.ndimage:
-    print(f"Reading image '{image_path}'...", end=" ", flush=True)
-    image = read_ics(image_path)
-    print("DONE")
-
-    return image
+    with op_indicator(f"Reading image '{image_path}'"):
+        return read_ics(image_path)
 
 
 def verbose_write_ics(image_path: Path, image: np.ndimage) -> None:
-    print(f"Saving image '{image_path}'...", end=" ", flush=True)
-    write_ics(image_path, image)
-    print("DONE")
+    with op_indicator(f"Saving image '{image_path}'"):
+        write_ics(image_path, image)
 
 
 def save_dataset_as_ics(dataset: IterableDataset[tuple[np.ndarray, str]],

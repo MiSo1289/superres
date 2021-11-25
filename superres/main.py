@@ -13,18 +13,33 @@ from torchvision.transforms import Compose
 
 import superres.operators.ops as ops
 from superres.data.cache import CacheDataset
+from superres.data.transformed import TransformedDataset
 from superres.data.ics import IcsDataset, LoadIcsImagesFromDir, \
     verbose_read_ics, verbose_write_ics
 from superres.data.view import view_dataset
 from superres.evaluation.error import named_error_function
 from superres.nn.infer import infer, load_edsr
 from superres.nn.train import train_edsr
+from superres.utils.op_indicator import op_indicator
 
 ImagePair = tuple[np.ndarray, np.ndarray]
 ImagePairDataset = IterableDataset[ImagePair]
 NamedImage = tuple[np.ndarray, str]
 NamedImageDataset = IterableDataset[NamedImage]
 NamedImageDatasetFactory = Callable[[...], NamedImageDataset]
+
+
+def slice_ics_dataset(images: list[str], axis: int, start: int, end: int,
+                      **kwargs: object) -> NamedImageDataset:
+    def slice_transform(image: np.ndarray) -> np.ndarray:
+        sl = len(image.shape) * [slice(None, None, None)]
+        sl[axis] = slice(start, end, None)
+        return image[tuple(sl)]
+
+    return IcsDataset(
+        images,
+        transform=slice_transform,
+    )
 
 
 def downsample_ics_dataset(images: list[str], axis: int, factor: float,
@@ -57,11 +72,16 @@ def rotate_ics_dataset(images: list[str], axis_1: int, axis_2: int,
                        num_rotations: int, partitions: int,
                        **kwargs: object) -> NamedImageDataset:
     def rotations() -> Iterator[NamedImageDataset]:
-        yield IcsDataset(images)
+        dataset: NamedImageDataset = IcsDataset(images)
+        if len(images) == 1:
+            # Avoid re-reading the image
+            dataset = CacheDataset(dataset)
+
+        yield dataset
 
         for i in range(1, num_rotations):
-            yield IcsDataset(
-                images,
+            yield TransformedDataset(
+                dataset,
                 transform=ops.rotate(
                     axes=(axis_1, axis_2),
                     theta=(2 * i * pi) / num_rotations,
@@ -145,7 +165,7 @@ def view_command(images: list[str], **kwargs: object) -> None:
 
 
 def train_command(images: list[str], target_folder: str, out_model: str,
-                  scale: int, infer_axis: int, rgb_range: int,
+                  infer_axis: int, max_color_level: int,
                   in_memory: bool, device: str, epochs: int, batch_size: int,
                   patch_size: int, learning_rate: float,
                   **kwargs: object) -> None:
@@ -164,9 +184,8 @@ def train_command(images: list[str], target_folder: str, out_model: str,
 
     model = train_edsr(
         train_dataset,
-        scale=scale,
         infer_axis=infer_axis,
-        rgb_range=rgb_range,
+        max_color_level=max_color_level,
         device=device,
         epochs=epochs,
         batch_size=batch_size,
@@ -174,29 +193,26 @@ def train_command(images: list[str], target_folder: str, out_model: str,
         patch_size=patch_size,
     )
 
-    print(f"Saving model '{out_model}'...", end=" ", flush=True)
-    os.makedirs(os.path.dirname(out_model), exist_ok=True)
-    torch.save(model.state_dict(), out_model)
-    print("DONE")
+    with op_indicator(f"Saving model '{out_model}'"):
+        os.makedirs(os.path.dirname(out_model), exist_ok=True)
+        torch.save(model.state_dict(), out_model)
 
 
-def inferred_dataset(model: str, images: list[str], scale: int, rgb_range: int,
+def inferred_dataset(model: str, images: list[str], max_color_level: int,
                      infer_axis: int, train_axis: int, device: str,
-                     **kwargs: object) -> NamedImageDataset:
-    print(f"Saving model '{model}'...", end=" ", flush=True)
-    model = load_edsr(
-        model_path=model,
-        scale=scale,
-        rgb_range=rgb_range,
-        device=device,
-    )
-    print("DONE")
+                     chunk_size: int, **kwargs: object) -> NamedImageDataset:
+    with op_indicator(f"Loading model '{model}'"):
+        loaded_model = load_edsr(
+            model_path=model,
+            max_color_level=max_color_level,
+            device=device,
+        )
 
     return IcsDataset(
         images,
         transform=lambda image: infer(
-            model=model, image=image, scale=scale, infer_axis=infer_axis,
-            train_axis=train_axis, device=device),
+            model=loaded_model, image=image, infer_axis=infer_axis,
+            train_axis=train_axis, device=device, chunk_size=chunk_size),
     )
 
 
@@ -218,6 +234,32 @@ def compare_command(reference: str, images: list[str], metric: str,
 def main() -> None:
     parser = ArgumentParser()
     subparsers = parser.add_subparsers()
+
+    slice_parser = create_dataset_command_parser(
+        subparsers.add_parser(
+            "slice",
+            help="Slice images on an axis",
+        ),
+        dataset_factory=slice_ics_dataset,
+    )
+    slice_parser.add_argument(
+        "-a", "--axis",
+        type=int,
+        default=0,
+        help="Axis to slice",
+    )
+    slice_parser.add_argument(
+        "-s", "--start",
+        type=int,
+        default=0,
+        help="Start of slice",
+    )
+    slice_parser.add_argument(
+        "-e", "--end",
+        type=int,
+        default=-1,
+        help="End of slice",
+    )
 
     downsample_parser = create_dataset_command_parser(
         subparsers.add_parser(
@@ -383,19 +425,13 @@ def main() -> None:
         help="Where to store trained model",
     )
     train_parser.add_argument(
-        "-s", "--scale",
-        type=int,
-        default=2,
-        help="Super-resolution scale",
-    )
-    train_parser.add_argument(
         "--infer-axis",
         type=int,
         default=0,
         help="Inference axis",
     )
     train_parser.add_argument(
-        "--rgb-range",
+        "--max-color-level",
         type=int,
         default=255,
         help="Max color value",
@@ -449,12 +485,6 @@ def main() -> None:
         help="Trained model",
     )
     infer_parser.add_argument(
-        "-s", "--scale",
-        type=int,
-        default=2,
-        help="Super-resolution scale",
-    )
-    infer_parser.add_argument(
         "--train-axis",
         type=int,
         default=2,
@@ -467,7 +497,7 @@ def main() -> None:
         help="Inference axis",
     )
     infer_parser.add_argument(
-        "--rgb-range",
+        "--max-color-level",
         type=int,
         default=255,
         help="Max color value",
@@ -477,6 +507,12 @@ def main() -> None:
         type=str,
         default="cuda:0",
         help="Device to run inference on",
+    )
+    infer_parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=1,
+        help="Number of slices to pass to the model at the same time",
     )
 
     compare_parser = subparsers.add_parser(
