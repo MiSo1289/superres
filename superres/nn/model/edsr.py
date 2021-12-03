@@ -30,7 +30,7 @@ class Args(NamedTuple):
     # Number of color channels
     n_colors: int = 3
     # Residual scaling
-    res_scale: float = 1
+    res_scale: float = 0.1
 
 
 class EDSR(nn.Module):

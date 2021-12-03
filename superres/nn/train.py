@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import copy
 from typing import Any, TypeVar
 
 import numpy as np
 import numpy.typing as npt
 import torch.nn as nn
 import torch.optim as optim
+import torch.optim.lr_scheduler as lrs
+
 from torch.utils.data import DataLoader, IterableDataset
 from torchvision.transforms import Compose, RandomCrop, RandomHorizontalFlip, \
     RandomVerticalFlip, Resize, ToTensor
 
 import superres.nn.model.edsr as edsr
 from superres.data.slices import SlicesDataset
-from superres.data.transformed import TransformedDataset
+from superres.data.transformed import TransformedIterableDataset, \
+    TransformedDataset
+from superres.data.cache import PreloadDataset
 
 T = TypeVar("T", bound=np.generic)
 
@@ -35,7 +40,7 @@ def train_edsr(images: IterableDataset[tuple[npt.NDArray[T], npt.NDArray[T]]],
     ])
 
     train_data = TransformedDataset(
-        SlicesDataset(images, sliced_axis=infer_axis),
+        PreloadDataset(SlicesDataset(images, sliced_axis=infer_axis)),
         transform=transform,
         target_transform=transform,
         same_rng=True,
@@ -56,7 +61,9 @@ def train_edsr(images: IterableDataset[tuple[npt.NDArray[T], npt.NDArray[T]]],
         amsgrad=False,
     )
 
-    dataloader = DataLoader(train_data, batch_size=batch_size)
+    scheduler = lrs.ExponentialLR(optimizer, gamma=0.90)
+
+    dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 
     epoch_avg_losses: list[float] = []
     best_epoch: int | None = None
@@ -66,42 +73,61 @@ def train_edsr(images: IterableDataset[tuple[npt.NDArray[T], npt.NDArray[T]]],
     print(f"epochs={epochs} batch_size={batch_size}")
     print(f"learning_rate={learning_rate}")
 
-    for epoch in range(epochs):
-        epoch_sum_loss = 0.0
-        num_batches = 0
+    try:
+        for epoch in range(epochs):
+            epoch_sum_loss = 0.0
+            num_batches = 0
 
-        for batch, (image, target) in enumerate(dataloader):
-            # Compute prediction and loss
-            pred = model(image.to(device=device))
-            loss = loss_fn(pred, target.to(device=device))
+            for batch, (image, target) in enumerate(dataloader):
+                # Compute prediction and loss
+                pred = model(image.to(device=device))
+                loss = loss_fn(pred, target.to(device=device))
 
-            # Backpropagation
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                # Backpropagation
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-            print(f"epoch={epoch} batch={batch} loss={loss}")
+                print(f"epoch={epoch} batch={batch} loss={loss}")
 
-            epoch_sum_loss += float(loss)
-            num_batches += 1
+                epoch_sum_loss += float(loss)
+                num_batches += 1
 
-        epoch_avg_loss = epoch_sum_loss / num_batches
-        print(f"epoch_avg_loss={epoch_avg_loss}")
+            scheduler.step()
 
-        epoch_avg_losses.append(epoch_avg_loss)
+            epoch_avg_loss = epoch_sum_loss / num_batches
+            print(f"epoch_avg_loss={epoch_avg_loss}")
 
-        if len(epoch_avg_losses) >= 2:
-            epoch_loss_delta = epoch_avg_losses[-1] - epoch_avg_losses[-2]
-            print(f"epoch_loss_delta={epoch_loss_delta}")
+            epoch_avg_losses.append(epoch_avg_loss)
 
-        if best_loss is None or epoch_avg_loss < best_loss:
-            best_loss = epoch_avg_loss
-            best_epoch = epoch
-            best_model_state = model.state_dict()
+            if len(epoch_avg_losses) >= 2:
+                epoch_loss_delta = epoch_avg_losses[-1] - epoch_avg_losses[-2]
+                print(f"epoch_loss_delta={epoch_loss_delta}")
+
+            if best_loss is None or epoch_avg_loss < best_loss:
+                best_loss = epoch_avg_loss
+                best_epoch = epoch
+                best_model_state = copy.deepcopy(model.state_dict())
+    except KeyboardInterrupt:
+        print("Exiting early")
+        print(f"epoch_avg_losses={epoch_avg_losses}")
+        print(f"Best model state from epoch={best_epoch} "
+              f"with loss={best_loss}")
+
+        answer: str | None = None
+        while answer not in ('y', 'n'):
+            answer = input("Save best model? [y / n] ")
+
+        if answer == 'n':
+            print("Aborting")
+            exit(1)
+        else:
+            model.load_state_dict(best_model_state)
+
+            return model
 
     print("Finished training")
     print(f"epoch_avg_losses={epoch_avg_losses}")
-
     print(f"Using best model state from epoch={best_epoch} "
           f"with loss={best_loss}")
     model.load_state_dict(best_model_state)

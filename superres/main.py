@@ -13,7 +13,7 @@ from torchvision.transforms import Compose
 
 import superres.operators.ops as ops
 from superres.data.cache import CacheDataset
-from superres.data.transformed import TransformedDataset
+from superres.data.transformed import TransformedIterableDataset
 from superres.data.ics import IcsDataset, LoadIcsImagesFromDir, \
     verbose_read_ics, verbose_write_ics
 from superres.data.view import view_dataset
@@ -80,7 +80,7 @@ def rotate_ics_dataset(images: list[str], axis_1: int, axis_2: int,
         yield dataset
 
         for i in range(1, num_rotations):
-            yield TransformedDataset(
+            yield TransformedIterableDataset(
                 dataset,
                 transform=ops.rotate(
                     axes=(axis_1, axis_2),

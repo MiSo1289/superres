@@ -83,8 +83,8 @@ def infer(model: nn.Module, image: np.ndarray, chunk_size: int = 1,
         for chunk in np.array_split(image, num_partitions, axis=third_axis):
             slice_tensors = []
             for sl in slices(chunk, axis=third_axis):
-                # if transpose_axes:
-                #     sl = sl.transpose()
+                if transpose_axes:
+                    sl = sl.transpose()
                 slice_tensors.append(to_tensor(np.stack([sl], axis=-1)))
 
             chunk_tensor = torch.stack(slice_tensors).to(device)
@@ -94,8 +94,8 @@ def infer(model: nn.Module, image: np.ndarray, chunk_size: int = 1,
 
             inferred_chunk_slices: list[np.ndarray] = []
             for sl in slices(chunk_inference, axis=0):
-                # if transpose_axes:
-                #     sl = sl.transpose()
+                if transpose_axes:
+                    sl = sl.transpose()
                 inferred_chunk_slices.append(sl)
             inferred_chunks.append(
                 np.stack(inferred_chunk_slices, axis=third_axis))
