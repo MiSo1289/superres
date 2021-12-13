@@ -11,20 +11,20 @@ INFERENCE_AXIS=0
 TRAIN_AXIS_1=2
 TRAIN_AXIS_2=1
 SLICE_SEPARATION=4
-NUM_ROTATIONS=4
+NUM_ROTATIONS=7
 NUM_PARTITIONS=1
 MAX_COLOR_LEVEL=600
-TRAIN_EPOCHS=20
+TRAIN_EPOCHS=40
 TRAIN_BATCH_SIZE=32
 TRAIN_LEARNING_RATE="1e-3"
-TRAIN_PATCH_SIZE_SSR=128
+TRAIN_PATCH_SIZE_SSR=32
 COMPARE_METRIC="mse"
 INFER_CHUNK_SIZE=3
 
-DATA_ROOT="/home/miso/Projects/Courses/PV162/data"
-OUT_ROOT="${DATA_ROOT}/out-${SLICE_SEPARATION}x-no-saa"
-IMG_NAME="image-final_0000.ics"
-MODEL_NAME="ssr"
+DATA_ROOT="/home/miso/Projects/Courses/PV162/data/colon-tissue"
+OUT_ROOT="${DATA_ROOT}/out-${SLICE_SEPARATION}x"
+IMG_NAME="image.ics"
+MODEL_NAME="ssr-p32-40-epochs"
 
 echo "Prepare ground truth by making the input data evenly divisible by slice separation"
 superres slice -a "${INFERENCE_AXIS}" -s 0 -e 128 \
